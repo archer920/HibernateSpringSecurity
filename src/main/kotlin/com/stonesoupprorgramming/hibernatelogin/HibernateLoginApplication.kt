@@ -51,6 +51,7 @@ data class SiteUser (@field: Id @field: GeneratedValue var id : Int = 0,
                      var accountNonLocked : Boolean = true,
                      @field: OneToMany(targetEntity = Roles::class) var roles: MutableSet<Roles> = mutableSetOf()){
 
+    //Convert this class to Spring Security's User object
     fun toUser() : User {
         val authorities = mutableSetOf<GrantedAuthority>()
         roles.forEach { authorities.add(SimpleGrantedAuthority(it.role)) }
@@ -66,49 +67,66 @@ class DataConfig {
 }
 
 @Configuration
-class SecurityConfig(@Autowired private val userService : UserService) : WebSecurityConfigurerAdapter() {
+class SecurityConfig(@Autowired private val userService : UserService) : //Inject UserService
+        WebSecurityConfigurerAdapter() { //Extend WebSecurityConfigureAdaptor
 
+    //Override this method to configure Authentication
     override fun configure(auth: AuthenticationManagerBuilder) {
-        auth.userDetailsService(userService).passwordEncoder(BCryptPasswordEncoder())
+        auth
+                .userDetailsService(userService) //We pass our userService to userDetailsService
+                .passwordEncoder(BCryptPasswordEncoder()) //Pass our Encryption Scheme also
     }
 
     override fun configure(http: HttpSecurity) {
-        http.formLogin()
-                .and()
+        http.
+                formLogin()
+                    .and()
                 .httpBasic()
-                .and()
+                    .and()
                 .authorizeRequests()
-                .antMatchers("/display").authenticated()
-                .anyRequest().permitAll()
+                    .antMatchers("/display").authenticated()
+                    .anyRequest().permitAll()
 
     }
 }
 
-@Transactional
-@Service
-class UserService(@Autowired private val userRepository: UserRepository) : UserDetailsService {
+@Transactional //Have Spring Manage Database Transactions
+@Service //Mark this class as a Service layer class
+class UserService(@Autowired private val userRepository: UserRepository) //Inject UserRepository into this class
+    : UserDetailsService { //To work with Spring Security, it needs to implement UserDetailsService
 
+    //Load a user by user name and call our SiteUser.toUser() method
     override fun loadUserByUsername(userName: String): UserDetails  = userRepository.loadByUsername(userName).toUser()
 
+    //Saves a new user into the datastore
     fun saveOrUpdate(user : SiteUser){
+        //Encrypt their password first
         user.password = BCryptPasswordEncoder().encode(user.password)
+
+        //Then save the user
         userRepository.saveOrUpdate(user)
     }
 
+    //Return all users
     fun allUsers() = userRepository.allUsers()
 }
 
 @Repository
+//Inject SessionFactory into this class
 class UserRepository(@Autowired private val sessionFactory: SessionFactory){
 
+    //Used to save new users into the datastore
     fun saveOrUpdate(user: SiteUser){
         sessionFactory.currentSession.saveOrUpdate(user)
     }
 
+    //Query the database by user name and return a SiteUser that matches
+    //the user name
     fun loadByUsername(userName: String) : SiteUser =
             sessionFactory.currentSession.createCriteria(SiteUser::class.java, "su")
                     .add(Restrictions.eq("su.userName", userName)).uniqueResult() as SiteUser
 
+    //Return all Site Users from the database
     fun allUsers(profile : String = "default") : List<SiteUser> {
         val session = sessionFactory.currentSession
         session.enableFetchProfile(profile)
